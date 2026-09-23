@@ -1,0 +1,96 @@
+services:
+  bot:
+    image: s29-bots:${S29_IMAGE_TAG:-prod}
+    build: .
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      database:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      BOT_TOKEN: ${BOT_TOKEN:?Set BOT_TOKEN in .env or the environment}
+      SERVER_LOCATION: ${SERVER_LOCATION:?Set SERVER_LOCATION in .env or the environment}
+      VOICE_GUILD_ID: ${VOICE_GUILD_ID:?Set VOICE_GUILD_ID in .env or the environment}
+      VOICE_CHANNEL_ID: ${VOICE_CHANNEL_ID:?Set VOICE_CHANNEL_ID in .env or the environment}
+      DATABASE_HOST: database
+      DATABASE_PORT: 5432
+      DATABASE_NAME: ${DATABASE_NAME:-s29_bots}
+      DATABASE_USER: ${DATABASE_USER:-s29}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env or the environment}
+      REDIS_URL: redis://redis:6379
+      HTTP_HOST: 0.0.0.0
+      HTTP_PORT: ${HTTP_PORT:-3000}
+    ports:
+      - "127.0.0.1:${HTTP_PORT:-3000}:${HTTP_PORT:-3000}"
+    volumes:
+      - ./messages:/app/messages:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:' + process.env.HTTP_PORT + '/livez').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+
+  database:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DATABASE_NAME:-s29_bots}
+      POSTGRES_USER: ${DATABASE_USER:-s29}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env or the environment}
+    ports:
+      - "127.0.0.1:${DATABASE_PORT:-5432}:5432"
+    volumes:
+      - database_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --save
+      - "60"
+      - "1"
+      - --maxmemory-policy
+      - noeviction
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  database_data:
+  redis_data:

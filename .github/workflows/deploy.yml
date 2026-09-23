@@ -1,0 +1,64 @@
+name: deploy s29 bots
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: s29-bots-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the production commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Prepare deployment archive
+        run: >-
+          git archive --format=tar.gz --output="$RUNNER_TEMP/s29-bots.tar.gz"
+          "$GITHUB_SHA"
+          Dockerfile .dockerignore compose.yaml package.json package-lock.json
+          tsconfig.json src
+
+      - name: Configure SSH
+        env:
+          ssh_key: ${{ secrets.HOSTINGER_SSH_KEY }}
+          HOSTINGER_HOST: ${{ vars.HOSTINGER_HOST }}
+          HOSTINGER_PORT: ${{ vars.HOSTINGER_PORT }}
+          HOSTINGER_HOST_KEY_FINGERPRINT: ${{ vars.HOSTINGER_HOST_KEY_FINGERPRINT }}
+        run: |
+          install -m 0700 -d "$HOME/.ssh"
+          printf '%s\n' "$ssh_key" > "$HOME/.ssh/s29_bots_deploy"
+          chmod 0600 "$HOME/.ssh/s29_bots_deploy"
+          ssh-keyscan -T 10 -p "$HOSTINGER_PORT" -t ed25519 "$HOSTINGER_HOST" > "$RUNNER_TEMP/hostinger_known_hosts"
+          host_key_fingerprint="$(ssh-keygen -lf "$RUNNER_TEMP/hostinger_known_hosts" | awk 'NR == 1 { print $2 }')"
+          if [ "$host_key_fingerprint" != "$HOSTINGER_HOST_KEY_FINGERPRINT" ]; then
+            echo "Hostinger SSH host key did not match the pinned fingerprint." >&2
+            exit 1
+          fi
+          install -m 0600 "$RUNNER_TEMP/hostinger_known_hosts" "$HOME/.ssh/known_hosts"
+
+      - name: Deploy to Hostinger
+        env:
+          HOSTINGER_HOST: ${{ vars.HOSTINGER_HOST }}
+          HOSTINGER_PORT: ${{ vars.HOSTINGER_PORT }}
+          HOSTINGER_USER: ${{ vars.HOSTINGER_USER }}
+        run: |
+          ssh \
+            -i "$HOME/.ssh/s29_bots_deploy" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -p "$HOSTINGER_PORT" \
+            "$HOSTINGER_USER@$HOSTINGER_HOST" \
+            "deploy $GITHUB_SHA" \
+            < "$RUNNER_TEMP/s29-bots.tar.gz"
