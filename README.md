@@ -48,9 +48,9 @@ Compose starts PostgreSQL and Redis first, waits for their health checks, then s
 
 The production stack lives in `/srv/s29-bots` as its own Docker Compose project. It keeps separate PostgreSQL and Redis volumes from LuaAegis and other apps on the VPS. The bot health endpoint uses `127.0.0.1:3000`; PostgreSQL and Redis use the loopback ports `55432` and `56379` so they do not overlap with the services already on the host.
 
-Pushing to `main` runs `.github/workflows/deploy.yml`. The workflow sends that commit's Docker and source files over a restricted SSH key, builds a versioned image on the VPS, waits for `/readyz`, and switches the current release only after it is healthy. Failed updates start the prior image again.
+Pushing to `main` runs `.github/workflows/deploy.yml` on the dedicated `s29-bots` GitHub Actions runner installed on the VPS as `s29deploy`, separate from LuaAegis's runner. It builds a versioned image, waits for `/readyz`, and switches the current release only after it is healthy. Failed updates start the prior image again. The runner can invoke only the host-side deployment script through `sudo`; no SSH key or production `.env` is stored in GitHub.
 
-The VPS keeps production settings in `/srv/s29-bots/shared/.env`. The repository does not store that file or the deploy private key. `deploy/hostinger/provision.sh` installs the locked-down deploy account and host-side deployment scripts.
+The VPS keeps production settings in `/srv/s29-bots/shared/.env`. `deploy/hostinger/provision.sh` installs the locked-down deploy account and host-side deployment scripts.
 
 ## HTTP and metrics
 
